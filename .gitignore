@@ -2,7 +2,9 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,macos
 
 ## Google cloud sensity information
-*.apps.googleusercontent.com.json
+client_secret*.json
+*credentials.json
+*token.json
 
 
 ### macOS ###
