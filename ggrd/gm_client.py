@@ -8,12 +8,87 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+import gspread
 import pandas as pd
-from bs4 import BeautifulSoup as bs
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+
+APP_NAME = "ggrd"
+DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+class GoogleAuthManager:
+    def __init__(self):
+        self.lg = CustomLogger(name=APP_NAME).getLogger()
+        self.emails = []
+        # self.token = self.get_gmail_service()
+        self.secrets_dirpath = Path(__file__).parent / "secrets"
+        self.creds_file = self.get_credentials_json(self.secrets_dirpath)
+        self.token_file = self.secrets_dirpath / "token.json"
+
+        self.SCOPES = [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]  # If modifying these SCOPES, delete the file token.json.
+        self.creds = self.get_google_credentials()
+        self.lg.debug("google cred initialized")
+
+    def get_google_credentials(self):
+        creds = None
+
+        # The file token.json stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if self.token_file.is_file():
+            creds = Credentials.from_authorized_user_file(self.token_file)
+
+        # If there are no (valid) credentials available, let the user log in.
+        if creds is None or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self.creds_file, self.SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+
+            # Save the credentials for the next run
+            with open(self.token_file, "w") as token:
+                token.write(creds.to_json())
+        return creds
+
+    def get_gmail_service(self):
+        """Shows basic usage of the Gmail API.
+        Lists the user's Gmail labels.
+        """
+        # Build the Gmail API service
+        service = build("gmail", "v1", credentials=self.creds)
+        return service
+
+    def get_credentials_json(self, secrets_dirpath: Path) -> Path:
+        json_file = None
+        for kw in ["client_secret_*.json", "*credentials.json"]:
+            try:
+                json_file = next(secrets_dirpath.glob(kw))
+            except StopIteration:
+                pass
+        if json_file is None:
+            raise FileNotFoundError("google credentials json file not found")
+        return json_file
+
+    def get_sheets_service0(self):
+        ## Original implementation without gspread library dependencies
+        service = build("sheets", "v4", credentials=self.creds)
+        return service
+
+    def get_sheets_service(self):
+        return gspread.oauth(
+            credentials_filename=self.creds_file,
+            authorized_user_filename=self.token_file,
+        )
 
 
 class CustomLogger:
@@ -23,9 +98,9 @@ class CustomLogger:
         level: str = "INFO",
         logfile_dirpath: Path | str | None = None,
         console_fmt: str = "[%(asctime)s]%(levelname)-5s: %(message)s",
-        console_datefmt: str = "%Y-%m-%d %H:%M:%S",
+        console_datefmt: str = DATETIME_FMT,
         logfile_fmt: str = "[%(asctime)s]%(levelname)-5s: %(message)s",
-        logfile_datefmt: str = "%Y-%m-%d %H:%M:%S",
+        logfile_datefmt: str = DATETIME_FMT,
         rotating_maxBytes: int = 2_097_152,
         rotating_backupCount: int = 5,
     ):
@@ -92,55 +167,11 @@ class EmailContent:
 
 class EmailClient:
     def __init__(self):
-        self.lg = CustomLogger().getLogger()
+        self.lg = CustomLogger(name=APP_NAME).getLogger()
         self.emails = []
-        self.SCOPES = [
-            "https://www.googleapis.com/auth/userinfo.profile",
-            "https://www.googleapis.com/auth/gmail.readonly",
-        ]  # If modifying these SCOPES, delete the file token.json.
-        self.token = self.get_gmail_service(Path(__file__).parent / "secrets")
-        self.lg.info("gmail authenticated success")
-
-    def get_credentials_json(self, secrets_dirpath: Path) -> Path:
-        json_file = None
-        for kw in ["client_secret_*.json", "*credentials.json"]:
-            try:
-                json_file = next(secrets_dirpath.glob(kw))
-            except StopIteration:
-                pass
-        if json_file is None:
-            raise FileNotFoundError("google credentials json file not found")
-        return json_file
-
-    def get_gmail_service(self, secrets_dirpath: Path):
-        """Shows basic usage of the Gmail API.
-        Lists the user's Gmail labels.
-        """
-        creds = None
-        token_file = secrets_dirpath / "token.json"
-        # The file token.json stores the user's access and refresh tokens, and is
-        # created automatically when the authorization flow completes for the first
-        # time.
-        if token_file.is_file():
-            creds = Credentials.from_authorized_user_file(token_file)
-
-        # If there are no (valid) credentials available, let the user log in.
-        if creds is None or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.get_credentials_json(secrets_dirpath), self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-
-            # Save the credentials for the next run
-            with open(token_file, "w") as token:
-                token.write(creds.to_json())
-
-        # Build the Gmail API service
-        self.service = build("gmail", "v1", credentials=creds)
-        return token_file
+        self.gga = GoogleAuthManager()
+        self.service = self.gga.get_gmail_service()
+        self.lg.info("gmail service built")
 
     def get_messages(self, user_id="me", sender_email=None, limit: int = 0):
         try:
@@ -218,13 +249,13 @@ class OutpostEmailClient(EmailClient):
             "Membership": "membership_name",
         }
 
-    def run(self):
+    def run(self) -> pd.DataFrame:
         # Get and print the messages in the user's inbox
         self.get_messages(sender_email="no-reply@outpostclimbing.rezeve.com", limit=0)
-        self.consolidate_all_emails()
-        pass
+        df = self.consolidate_all_emails()
+        return df
 
-    def print_emails(self):
+    def print_emails(self) -> None:
         for email in self.emails:
             print(email.df)
 
@@ -246,7 +277,6 @@ class OutpostEmailClient(EmailClient):
                 df["datetime"] = pd.to_datetime(
                     df["datetime"], format="%d %b %Y @ %H:%M %p", errors="raise"
                 )
-                df.set_index("datetime", inplace=True)
                 return df
         return pd.DataFrame()
 
@@ -257,14 +287,92 @@ class OutpostEmailClient(EmailClient):
             sender=e.sender, subject=e.subject, body_text=e.body_text, df=df
         )
 
-    def consolidate_all_emails(self):
+    def consolidate_all_emails(self) -> pd.DataFrame:
         df = pd.concat([email.df for email in self.emails])
+        df.sort_values(by="datetime", inplace=True, ascending=True)
+        df.reset_index(drop=True, inplace=True)
+        return df
+
+
+class GoogleSheetClient:
+    def __init__(
+        self, spreadsheet_id: str = "162NnzVFuBGUb0JBTY0G2h2Jmb6SsrV3xLAUovS_ob_Q"
+    ):
+        self.lg = CustomLogger(APP_NAME).getLogger()
+        self.spreadsheet_id = spreadsheet_id
+        self.gga = GoogleAuthManager()
+        self.service = self.gga.get_sheets_service()
+        self.lg.debug("google sheets service built")
+        self.ss = self.service.open_by_key(self.spreadsheet_id)
+
+    def read_data(self, sheet_name: str = "data") -> pd.DataFrame:
+        try:
+            worksheet = self.ss.worksheet(sheet_name)
+            df = pd.DataFrame(worksheet.get_all_records())
+            df["datetime"] = pd.to_datetime(df["datetime"], format=DATETIME_FMT)
+            return df
+        except Exception as e:
+            self.lg.error(f"read data from gsheet({sheet_name=}) failed; {e=}")
+            return pd.DataFrame()
+
+    def write_data(self, df: pd.DataFrame, sheet_name: str = "data"):
+        worksheet = self.ss.worksheet(sheet_name)
+        range_name = "A2"
+        worksheet.update(values=[["hello", "world"], ["a", "b"]], range_name="C1")
+
+    def reset_and_write_data(self, df: pd.DataFrame, sheet_name: str = "data"):
+        worksheet = self.ss.worksheet(sheet_name)
+        worksheet.clear()
+        df = self.parse_data_for_gsheet(df)
+        worksheet.update(values=[list(df.columns)], range_name="A1")
+        worksheet.update(values=df.values.tolist(), range_name="A2")
+
+    def parse_data_for_gsheet(self, dfin: pd.DataFrame) -> pd.DataFrame:
+        df = dfin.copy()
+        df["datetime"] = df["datetime"].dt.strftime(DATETIME_FMT)
+        return df
+
+    def read_data0(self, range_name: str = "raw!A1:C9999"):
+        ## Original implementation without gspread library dependencies
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(spreadsheetId=self.spreadsheet_id, range=range_name)
+                .execute()
+            )
+            values = result.get("values", [])
+
+            if not values:
+                print("No data found.")
+            else:
+                print("Name, Major:")
+                for row in values:
+                    # Print columns A and B
+                    print(f"{row[0]}, {row[1]}")
+
+        except Exception as error:
+            print(f"An error occurred: {error}")
+
+    def get_last_entry_datetime(self, df):
+        #TODO: This
+        pass
+
+class Outpost:
+    def __init__(self):
+        # self.email = OutpostEmailClient()
+        # df_emails = self.email.run()
+        # print(df_emails)
+        gs = GoogleSheetClient()
+        # gs.reset_and_write_data(df_emails)
+        df = gs.read_data()
+        print(df.info())
         print(df)
 
 
 def main():
-    ec = OutpostEmailClient()
-    ec.run()
+    op = Outpost()
+
     # ec.logout()
 
 
