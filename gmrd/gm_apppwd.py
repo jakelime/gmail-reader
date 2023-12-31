@@ -1,9 +1,10 @@
 # Importing libraries
+import email
+import imaplib
 import os
 from typing import Any
+
 import dotenv
-import imaplib
-import email
 
 dotenv.load_dotenv()
 
