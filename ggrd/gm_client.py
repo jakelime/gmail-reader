@@ -1,4 +1,5 @@
 import base64
+from collections import OrderedDict
 import dataclasses
 import io
 import logging
@@ -173,12 +174,27 @@ class EmailClient:
         self.service = self.gga.get_gmail_service()
         self.lg.info("gmail service built")
 
-    def get_messages(self, user_id="me", sender_email=None, limit: int = 0):
+    def get_messages(
+        self,
+        user_id="me",
+        sender_email: Optional[str] = None,
+        after_date: Optional[str] = None,
+        before_date: Optional[str] = None,
+        limit: int = 0,
+    ):
         try:
             # Build a query string to filter messages by sender
-            query = f"from:{sender_email}" if sender_email else None
+            query_parts = []
+            if sender_email:
+                query_parts.append(f"from:{sender_email}")
+            if before_date:
+                query_parts.append(f"before:{before_date}")
+            if after_date:
+                query_parts.append(f"after:{after_date}")
 
-            # Get a list of messages that match the query
+            query = " ".join(query_parts)
+
+            # Get a list of messages thatÏ match the query
             response = (
                 self.service.users().messages().list(userId=user_id, q=query).execute()
             )
@@ -228,9 +244,9 @@ class EmailClient:
 
         return EmailContent(sender=sender, subject=subject, body_text=body)
 
-    def run(self):
+    def run(self, before_date: Optional[str] = None, after_date: Optional[str] = None):
         # Get and print the messages in the user's inbox
-        self.get_messages()
+        self.get_messages(before_date=before_date, after_date=after_date)
 
     def logout(self):
         os.remove(self.token)
@@ -241,17 +257,21 @@ class OutpostEmailClient(EmailClient):
     def __init__(self):
         super().__init__()
         self.kws = {
-            "Booking ref": "booking_ref",
             "Date & time": "datetime",
-            "Class": "class_name",
-            "Location": "location",
+            "Booking ref": "booking_ref",
             "Membership No": "membership_no",
             "Membership": "membership_name",
+            "Class": "class_name",
+            "Location": "location",
         }
 
-    def run(self) -> pd.DataFrame:
+    def run(self, after_date: Optional[str] = None) -> pd.DataFrame:
         # Get and print the messages in the user's inbox
-        self.get_messages(sender_email="no-reply@outpostclimbing.rezeve.com", limit=0)
+        self.get_messages(
+            sender_email="no-reply@outpostclimbing.rezeve.com",
+            after_date=after_date,
+            limit=0,
+        )
         df = self.consolidate_all_emails()
         return df
 
@@ -291,6 +311,7 @@ class OutpostEmailClient(EmailClient):
         df = pd.concat([email.df for email in self.emails])
         df.sort_values(by="datetime", inplace=True, ascending=True)
         df.reset_index(drop=True, inplace=True)
+        df = df[self.kws.values()]
         return df
 
 
@@ -354,19 +375,26 @@ class GoogleSheetClient:
         except Exception as error:
             print(f"An error occurred: {error}")
 
-    def get_last_entry_datetime(self, df):
-        #TODO: This
-        pass
+    def get_last_entry_datetime(self, df: Optional[pd.DataFrame] = None):
+        if df is None:
+            df = self.read_data()
+        ds = df.iloc[-1, :]
+        dt = ds["datetime"]
+        return dt
+
 
 class Outpost:
     def __init__(self):
-        # self.email = OutpostEmailClient()
+        self.email = OutpostEmailClient()
         # df_emails = self.email.run()
         # print(df_emails)
         gs = GoogleSheetClient()
         # gs.reset_and_write_data(df_emails)
-        df = gs.read_data()
-        print(df.info())
+        # df = gs.read_data()
+        # print(df.info())
+        # print(df)
+        dt = gs.get_last_entry_datetime()
+        df = self.email.run(after_date=dt.strftime("%Y/%m/%d"))
         print(df)
 
 
