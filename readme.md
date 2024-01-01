@@ -1,13 +1,13 @@
 # Gmail Reader
 
-Uses Google OAuth API to access your own gmail account.
+Uses Google OAuth API to access your own gmail, then ETL data into google sheets.
 
-Current example ETL:
+Current example:
 
-- Login to email using OAuth
-- Query for email from `no-reply@outpostclimbing.rezeve.com`
-- Compiles all the emails into a single `dataframe`
-- Data will show details of each time I went to the `outpost gym`
+- Login to email using OAuth, Google Credentials
+- Query for Gmail from `no-reply@outpostclimbing.rezeve.com`
+- Compiles data retreieved into pandas `dataframe`
+- Data compiled will be each record my my gym classes in `outpostclimbing`
 
 
 ## Quickstart
@@ -17,3 +17,4 @@ Current example ETL:
 1. Download credentials file i.e. `client_secret_123241-asdadae.apps.googleusercontent.com`
 1. Load the credentials file to `/gmail-reader/grrd/secrets/client_secret_123241-asdadae.apps.googleusercontent.com`
 1. Run `python cli.py`
+
