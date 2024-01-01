@@ -1,6 +1,6 @@
-from ggrd.utils import CustomLogger
 from ggrd.gmail import OutpostEmailClient
 from ggrd.sheets import GoogleSheetClient
+from ggrd.utils import CustomLogger
 
 APP_NAME = "ggrd"
 

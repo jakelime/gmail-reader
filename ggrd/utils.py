@@ -1,4 +1,6 @@
 import logging
+import shutil
+import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -11,31 +13,24 @@ class CustomLogger:
         self,
         name: str = __name__,
         level: str = "INFO",
-        logfile_dirpath: Path | str | None = None,
         console_fmt: str = "[%(asctime)s]%(levelname)-5s: %(message)s",
         console_datefmt: str = DATETIME_FMT,
         logfile_fmt: str = "[%(asctime)s]%(levelname)-5s: %(message)s",
         logfile_datefmt: str = DATETIME_FMT,
         rotating_maxBytes: int = 2_097_152,
         rotating_backupCount: int = 5,
+        cleanup_on_exit: bool = True,
     ):
+        self.tempdir = None
+        self.cleanup_on_exit = cleanup_on_exit
         self.name = name
         self.level = level
         self.console_fmt = logging.Formatter(fmt=console_fmt, datefmt=console_datefmt)
         self.logfile_fmt = logging.Formatter(fmt=logfile_fmt, datefmt=logfile_datefmt)
         self.rotating_maxBytes = rotating_maxBytes
         self.rotating_backupCount = rotating_backupCount
-        match logfile_dirpath:
-            case Path():
-                pass
-            case str():
-                logfile_dirpath = Path(logfile_dirpath)
-            case _:
-                logfile_dirpath = Path(__file__).parent
-
-        self.logfilepath = logfile_dirpath / f"{self.name}.log"
         self.logger = None
-        self.getLogger()
+        self.logger = self.getLogger()
 
     def make_logger(self, logger) -> logging.Logger:
         try:
@@ -44,6 +39,9 @@ class CustomLogger:
             c_handler.setFormatter(self.console_fmt)
             c_handler.setLevel(self.level)
             logger.addHandler(c_handler)
+
+            self.tempdir = tempfile.mkdtemp(prefix=f"{APP_NAME}-logfiles-")
+            self.logfilepath = Path(self.tempdir) / f"{self.name}.log"
             f_handler = RotatingFileHandler(
                 self.logfilepath,
                 maxBytes=self.rotating_maxBytes,
@@ -63,3 +61,12 @@ class CustomLogger:
         if logger.hasHandlers():
             return logger
         return self.make_logger(logger)
+
+    def run_cleanup(self):
+        if self.logger is not None:
+            for handler in self.logger.handlers:
+                self.logger.removeHandler(handler)
+                handler.close()
+
+        if self.cleanup_on_exit and self.tempdir is not None:
+            shutil.rmtree(self.tempdir)
