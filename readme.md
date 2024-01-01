@@ -1,4 +1,4 @@
-# Gmail Reader
+# Google Reader
 
 Uses Google OAuth API to access your own gmail, then ETL data into google sheets.
 
