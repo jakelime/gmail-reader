@@ -1,10 +1,9 @@
 import base64
-from collections import OrderedDict
 import dataclasses
-import io
 import logging
 import os
 import tempfile
+import warnings
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
@@ -16,6 +15,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 APP_NAME = "ggrd"
 DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -180,6 +180,7 @@ class EmailClient:
         sender_email: Optional[str] = None,
         after_date: Optional[str] = None,
         before_date: Optional[str] = None,
+        subject: Optional[str] = None,
         limit: int = 0,
     ):
         try:
@@ -191,6 +192,8 @@ class EmailClient:
                 query_parts.append(f"before:{before_date}")
             if after_date:
                 query_parts.append(f"after:{after_date}")
+            if subject:
+                query_parts.append(f"subject:{subject}")
 
             query = " ".join(query_parts)
 
@@ -270,6 +273,7 @@ class OutpostEmailClient(EmailClient):
         self.get_messages(
             sender_email="no-reply@outpostclimbing.rezeve.com",
             after_date=after_date,
+            subject="Booking confirmed:",
             limit=0,
         )
         df = self.consolidate_all_emails()
@@ -336,10 +340,21 @@ class GoogleSheetClient:
             self.lg.error(f"read data from gsheet({sheet_name=}) failed; {e=}")
             return pd.DataFrame()
 
-    def write_data(self, df: pd.DataFrame, sheet_name: str = "data"):
+    def update_data(self, dfin: pd.DataFrame, sheet_name: str = "data") -> None:
+        df = self.read_data(sheet_name=sheet_name)
+        dfin = self.parse_data_for_gsheet(dfin)
+
         worksheet = self.ss.worksheet(sheet_name)
-        range_name = "A2"
-        worksheet.update(values=[["hello", "world"], ["a", "b"]], range_name="C1")
+        current_row = len(df) + 2
+        for _, row in dfin.iterrows():
+            if (df["booking_ref"].eq(row.booking_ref)).any():
+                continue
+            range_name = f"A{current_row}"
+            worksheet.update(values=[row.tolist()], range_name=range_name)
+            current_row += 1
+            self.lg.info(f"[worksheet-{sheet_name}]: updated {range_name}")
+
+        self.lg.info(f"updated {current_row-len(df)-2} entries")
 
     def reset_and_write_data(self, df: pd.DataFrame, sheet_name: str = "data"):
         worksheet = self.ss.worksheet(sheet_name)
@@ -347,33 +362,12 @@ class GoogleSheetClient:
         df = self.parse_data_for_gsheet(df)
         worksheet.update(values=[list(df.columns)], range_name="A1")
         worksheet.update(values=df.values.tolist(), range_name="A2")
+        self.lg.info(f"update completed. {df.shape=}")
 
     def parse_data_for_gsheet(self, dfin: pd.DataFrame) -> pd.DataFrame:
         df = dfin.copy()
         df["datetime"] = df["datetime"].dt.strftime(DATETIME_FMT)
         return df
-
-    def read_data0(self, range_name: str = "raw!A1:C9999"):
-        ## Original implementation without gspread library dependencies
-        try:
-            result = (
-                self.service.spreadsheets()
-                .values()
-                .get(spreadsheetId=self.spreadsheet_id, range=range_name)
-                .execute()
-            )
-            values = result.get("values", [])
-
-            if not values:
-                print("No data found.")
-            else:
-                print("Name, Major:")
-                for row in values:
-                    # Print columns A and B
-                    print(f"{row[0]}, {row[1]}")
-
-        except Exception as error:
-            print(f"An error occurred: {error}")
 
     def get_last_entry_datetime(self, df: Optional[pd.DataFrame] = None):
         if df is None:
@@ -385,21 +379,30 @@ class GoogleSheetClient:
 
 class Outpost:
     def __init__(self):
+        self.lg = CustomLogger(APP_NAME).getLogger()
         self.email = OutpostEmailClient()
-        # df_emails = self.email.run()
-        # print(df_emails)
-        gs = GoogleSheetClient()
-        # gs.reset_and_write_data(df_emails)
-        # df = gs.read_data()
-        # print(df.info())
-        # print(df)
-        dt = gs.get_last_entry_datetime()
-        df = self.email.run(after_date=dt.strftime("%Y/%m/%d"))
-        print(df)
+        self.gsc = GoogleSheetClient()
+
+    def pull_updates_from_email(self, self_reset: bool = True) -> None:
+        try:
+            dt = self.gsc.get_last_entry_datetime()
+            df = self.email.run(after_date=dt.strftime("%Y/%m/%d"))
+            self.gsc.update_data(df)
+        except Exception as e:
+            self.lg.error(f"{e=}")
+            if self_reset:
+                self.lg.warning("attempting self reset...")
+                self.reset_data()
+
+    def reset_data(self) -> None:
+        df = self.email.run()
+        self.gsc.reset_and_write_data(df)
 
 
 def main():
     op = Outpost()
+    # op.reset_data()
+    op.pull_updates_from_email()
 
     # ec.logout()
 
