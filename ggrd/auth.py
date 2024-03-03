@@ -1,12 +1,16 @@
 from pathlib import Path
 
 import gspread
+from google.auth import exceptions as g_exceptions
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-from ggrd.utils import CustomLogger
+try:
+    from utils import CustomLogger
+except ImportError:
+    from ggrd.utils import CustomLogger
 
 APP_NAME = "ggrd"
 
@@ -39,7 +43,11 @@ class GoogleAuthManager:
         # If there are no (valid) credentials available, let the user log in.
         if creds is None or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                try:
+                    creds.refresh(Request())
+                except g_exceptions.RefreshError as e:
+                    # raise e
+                    self.lg.error(f"refresh error. try deleting token. {e=}")
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.creds_file, self.SCOPES
@@ -80,3 +88,11 @@ class GoogleAuthManager:
             credentials_filename=self.creds_file,
             authorized_user_filename=self.token_file,
         )
+
+
+def main():
+    gam = GoogleAuthManager()
+
+
+if __name__ == "__main__":
+    main()
