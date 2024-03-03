@@ -9,7 +9,7 @@ class Outpost:
     def __init__(self):
         self.lg = CustomLogger(APP_NAME).getLogger()
         self.email = OutpostEmailClient()
-        self.gsc = GoogleSheetClient()
+        self.gsc = GoogleSheetClient(spreadsheet_name=f"{APP_NAME}-Outpost-ClimbRecords")
 
     def pull_updates_from_email(self, self_reset: bool = True) -> None:
         try:

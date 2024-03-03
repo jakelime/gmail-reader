@@ -1,6 +1,8 @@
+import os
 import warnings
 from typing import Optional
 
+import gspread
 import pandas as pd
 
 from ggrd.auth import GoogleAuthManager
@@ -13,24 +15,55 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class GoogleSheetClient:
     def __init__(
-        self, spreadsheet_id: str = "162NnzVFuBGUb0JBTY0G2h2Jmb6SsrV3xLAUovS_ob_Q"
+        self,
+        spreadsheet_id: Optional[str] = None,
+        spreadsheet_name: Optional[str] = None,
     ):
         self.lg = CustomLogger(APP_NAME).getLogger()
-        self.spreadsheet_id = spreadsheet_id
         self.gga = GoogleAuthManager()
         self.gs = self.gga.get_gspread()
         self.lg.debug("google sheets service loaded")
-        self.ss = self.gs.open_by_key(self.spreadsheet_id)
+        if spreadsheet_id is not None:
+            self.ss = self.gs.open_by_key(spreadsheet_id)
+            self.lg.info(f"spreadsheet loaded - {spreadsheet_id=}")
+        elif spreadsheet_name is not None:
+            try:
+                self.ss = self.gs.open(spreadsheet_name)
+                self.lg.info(f"spreadsheet loaded - {spreadsheet_name=}")
+            except gspread.SpreadsheetNotFound as e:
+                self.lg.error(f"{spreadsheet_name=} not found")
+                self.ss = self.gs.create(spreadsheet_name)
+                self.lg.info(f"created new spreadsheet - {spreadsheet_name}")
+                self.share_spreadsheet(spreadsheet_name)
+        else:
+            raise ValueError("missing value 'spreadsheet_name' or 'spreadsheet_id'")
 
-    def read_data(self, sheet_name: str = "data") -> pd.DataFrame:
+    def share_spreadsheet(self, name: str) -> None:
+        emails_str = os.getenv("GOOGLE_ACCOUNTS", None)
+        if emails_str is None:
+            self.lg.warning("missing environment variable GOOGLE_ACCOUNTS")
+            return
+        emails = [em.strip() for em in emails_str.split(",")]
+        for em in emails:
+            self.ss.share(em, perm_type="user", role="writer")
+            self.lg.info(f"ss({name}) shared with {em}")
+
+    def read_data(self, sheet_name: str = "data") -> pd.DataFrame | None:
         try:
             worksheet = self.ss.worksheet(sheet_name)
+        except IndexError:
+            self.lg.warning(f"no worksheet named '{sheet_name}'")
+            self.ss.add_worksheet(sheet_name, rows=1000, cols=10)
+            self.lg.info(f"created {sheet_name=}")
+            worksheet = self.ss.worksheet(sheet_name)
+
+        try:
             df = pd.DataFrame(worksheet.get_all_records())
             df["datetime"] = pd.to_datetime(df["datetime"], format=DATETIME_FMT)
             return df
         except Exception as e:
             self.lg.error(f"read data from gsheet({sheet_name=}) failed; {e=}")
-            return pd.DataFrame()
+            return None
 
     def update_data(self, dfin: pd.DataFrame, sheet_name: str = "data") -> None:
         df = self.read_data(sheet_name=sheet_name)
@@ -64,6 +97,8 @@ class GoogleSheetClient:
     def get_last_entry_datetime(self, df: Optional[pd.DataFrame] = None):
         if df is None:
             df = self.read_data()
+        if df is None:
+            raise RuntimeError("unable to read data")
         ds = df.iloc[-1, :]
         dt = ds["datetime"]
         return dt

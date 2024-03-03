@@ -6,8 +6,12 @@ from typing import Optional
 
 import pandas as pd
 
-from ggrd.auth import GoogleAuthManager
-from ggrd.utils import CustomLogger
+try:
+    from auth import GoogleAuthManager
+    from utils import CustomLogger
+except ImportError:
+    from ggrd.auth import GoogleAuthManager
+    from ggrd.utils import CustomLogger
 
 APP_NAME = "ggrd"
 
@@ -178,3 +182,10 @@ class OutpostEmailClient(EmailClient):
         df.reset_index(drop=True, inplace=True)
         df = df[self.kws.values()]
         return df
+
+
+def main():
+    ec = EmailClient()
+
+if __name__ == "__main__":
+    main()
