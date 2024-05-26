@@ -36,7 +36,8 @@ class Outpost:
 
 def main():
     op = Outpost()
-    op.reset_data()
+    # op.reset_data()
+    op.pull_updates_from_email()
 
 
 if __name__ == "__main__":
