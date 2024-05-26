@@ -77,7 +77,7 @@ class EmailClient:
                         break
 
         except Exception as error:
-            self.lg.info(f"An error occurred: {error}")
+            self.lg.error(f"An error occurred: {error}", exc_info=True)
 
     def get_message(self, message_id, user_id="me") -> EmailContent:
         msg = (
@@ -94,21 +94,31 @@ class EmailClient:
         )
 
         # Get the content of the email
-        payload = msg["payload"]
         decoded_body = None
+        # payload = msg["payload"]
+        # [print(f"{k=}") for k,v in payload.items()]
+        # parts = payload["parts"]
+        # [print(f"{p.keys()}") for p in parts]
+        # part =
+        # body =
+        # body = base64.urlsafe_b64decode(parts[1]["body"]["data"]).decode("utf-8")
+        # print(f"{decoded_body=}")
+
         if "parts" in payload:
             for part in payload["parts"]:
                 if part["mimeType"] == "text/plain":
                     body = part["body"]["data"]
                     decoded_body = base64.urlsafe_b64decode(body).decode("utf-8")
-                    raise NotImplementedError("Not implemented - email in text")
+                    # print(f"{decoded_body}")
+                    # raise NotImplementedError("Not implemented - email in text")
                     break  # Stop after finding the first text/plain part
         else:
             # If the email has no parts, assume it is plaintext
             body = payload["body"]["data"]
             decoded_body = base64.urlsafe_b64decode(body).decode("utf-8")
 
-        body = decoded_body if decoded_body is not None else "No Body"
+        # body = decoded_body if decoded_body is not None else "No Body"
+        # raise Exception("STOP HERE")
 
         return EmailContent(sender=sender, subject=subject, body_text=body)
 
@@ -192,59 +202,173 @@ class AppleEmailClient(EmailClient):
     def run(self, after_date: Optional[str] = None) -> pd.DataFrame:
         # Get and print the messages in the user's inbox
         self.get_messages(
-            sender_email="no-reply@outpostclimbing.rezeve.com",
+            sender_email="no_reply@email.apple.com",
             after_date=after_date,
-            subject="Booking confirmed:",
+            subject='"Your invoice from Apple."',
             limit=0,
         )
         df = self.consolidate_all_emails()
-        return df
+        # return df
 
     def print_emails(self) -> None:
         for email in self.emails:
             print(email.df)
 
     def parse_html(self, html_str: str) -> pd.DataFrame:
+        ## The HTML is too complicated and without any ID to extract
         dfs = [None]
+        # with open("hello.html", "w") as fwriter:
+        #     fwriter.write(html_str)
+        # raise Exception("STOP HERE")
         with tempfile.NamedTemporaryFile(delete=True) as fp:
             with open(fp.name, "w") as fwriter:
                 fwriter.write(html_str)
             dfs = pd.read_html(fp)  # type: ignore
-        for df in dfs:
-            dff = df[df[0].isin(self.kws)]
-            if len(dff) < len(self.kws):
-                continue
-            else:
-                df = dff.copy()
-                df[0] = df[0].replace(self.kws)
-                df.set_index(0, inplace=True)
-                df = df.T
-                df["datetime"] = pd.to_datetime(
-                    df["datetime"], format="%d %b %Y @ %H:%M %p", errors="raise"
-                )
-                return df
-        return pd.DataFrame()
+            for i, df in enumerate(dfs):
+                print(f"\n\n{i}:\n{df}")
+
+            raise Exception("STOP HERE")
+        # for df in dfs:
+        #     dff = df[df[0].isin(self.kws)]
+        #     if len(dff) < len(self.kws):
+        #         continue
+        #     else:
+        #         df = dff.copy()
+        #         df[0] = df[0].replace(self.kws)
+        #         df.set_index(0, inplace=True)
+        #         df = df.T
+        #         df["datetime"] = pd.to_datetime(
+        #             df["datetime"], format="%d %b %Y @ %H:%M %p", errors="raise"
+        #         )
+        #         return df
+        # return pd.DataFrame()
 
     def get_message(self, message_id, user_id="me") -> EmailContent:
-        e = super().get_message(message_id, user_id)
-        df = self.parse_html(e.body_text)
+        # e = super().get_message(message_id, user_id)
+        msg = (
+            self.service.users().messages().get(userId=user_id, id=message_id).execute()
+        )
+        headers = msg["payload"]["headers"]
+        subject = next(
+            (header["value"] for header in headers if header["name"] == "Subject"),
+            "No Subject",
+        )
+        sender = next(
+            (header["value"] for header in headers if header["name"] == "From"),
+            "No Sender",
+        )
+
+        # Get the content of the email
+        decoded_body = None
+        payload = msg["payload"]
+
+        if "parts" in payload:
+            for part in payload["parts"]:
+                if part["mimeType"] == "text/plain":
+                    body = part["body"]["data"]
+                    decoded_body = base64.urlsafe_b64decode(body).decode("utf-8")
+                    break  # Stop after finding the first text/plain part
+        else:
+            raise Exception("No text/plain parts found in email payload")
+
+        body = decoded_body if decoded_body is not None else "No Body"
+        e = EmailContent(sender=sender, subject=subject, body_text=body)
+        df = self.parse_text(e.body_text)
+        print(df)
+        raise Exception("STOP HERE")
+        # Figure out why "Email subject INVOICE and RECEIPT requires different functions"
         return EmailContent(
             sender=e.sender, subject=e.subject, body_text=e.body_text, df=df
         )
 
+    def parse_text(self, txt: str) -> pd.DataFrame:
+        APPLE_ID = "APPLE ID"
+        ORDER_ID = "ORDER ID:"
+        DOC_NO = "DOCUMENT NO.:"
+        SEQ_NO = "SEQUENCE NO.:"
+        INVOICE_DATE = "INVOICE DATE:"
+        TOTAL = "TOTAL:"
+        try:
+            data = {}
+            lines = txt.split("\n")
+            iter_lines = iter(lines)
+            line = next(iter_lines)
+            while APPLE_ID not in line:
+                line = next(iter_lines)
+            data["email"] = next(iter_lines).strip()  # acetothestars@gmail.com
+            while ORDER_ID not in line:
+                line = next(iter_lines)
+            data["order_id"] = line.split(ORDER_ID)[-1].strip()  # ORDER ID: MVS0KQVLGX
+            while DOC_NO not in line:
+                line = next(iter_lines)
+            data["doc_no"] = line.split(DOC_NO)[
+                -1
+            ].strip()  # DOCUMENT NO.: 145796783741
+            while SEQ_NO not in line:
+                line = next(iter_lines)
+            data["sequence_no"] = line.split(SEQ_NO)[
+                -1
+            ].strip()  # DOCUMENT NO.: 145796783741
+            while INVOICE_DATE not in line:
+                line = next(iter_lines)
+            data["invoice_date"] = line.split(INVOICE_DATE)[
+                -1
+            ].strip()  # DOCUMENT NO.: 145796783741
+            while TOTAL not in line:
+                line = next(iter_lines)
+            data["total_amount"] = line.split(TOTAL)[
+                -1
+            ].strip()  # DOCUMENT NO.: 145796783741
+            while (
+                "--------------------------------------------------------------------------------"
+                not in line
+            ):
+                line = next(iter_lines)
+            descr = []
+            while "TOTAL" not in line:
+                line = next(iter_lines)
+                # if line
+                if (
+                    "--------------------------------------------------------------------------------"
+                    in line
+                ):
+                    line = next(iter_lines)
+                    continue
+                if len(line) > 1:  # avoids the /r character
+                    descr.append(line.strip())
+            data["descr_text"] = "\n".join(descr)
+            # df = pd.DataFrame(data, index=[0])
+            # print(df)
+            # return df
+        except StopIteration:
+            print(f"STOPPED ITERATION! {data=}\n{lines=}")
+        finally:
+            df = pd.DataFrame(data, index=[0])
+            return df
+
     def consolidate_all_emails(self) -> pd.DataFrame:
         df = pd.concat([email.df for email in self.emails])
-        df.sort_values(by="datetime", inplace=True, ascending=True)
-        df.reset_index(drop=True, inplace=True)
-        df = df[self.kws.values()]
+        # df.sort_values(by="datetime", inplace=True, ascending=True)
+        # df.reset_index(drop=True, inplace=True)
+        df.to_csv("helloworld.csv")
+        print(df)
+        # df = df[self.kws.values()]
         return df
 
 
 def main():
     # ec = EmailClient()
-    op = OutpostEmailClient()
-    df = op.run(after_date="2023-12-01")
-    print(df)
+    ap = AppleEmailClient()
+    ap.run()
+    # ap.get_messages(
+    # sender_email="no_reply@email.apple.com",
+    # after_date=after_date,
+    # subject="Booking confirmed:",
+    # limit=1,
+    # )
+    # op = OutpostEmailClient()
+    # df = op.run(after_date="2023-12-01")
+    # print(df)
 
 
 if __name__ == "__main__":
