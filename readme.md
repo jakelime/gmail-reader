@@ -13,7 +13,7 @@ Current example:
 ## Quickstart
 
 1. Make sure you have already started a new project on Google Cloud Console `https://console.cloud.google.com/`
-1. Enable `Gmail API` and `Google Sheets API`
+1. Enable `Gmail API`, `Google Sheets API`, `Google Drive API`
 1. Download credentials file i.e. `client_secret_123241-asdadae.apps.googleusercontent.com`
 1. Load the credentials file to `/gmail-reader/grrd/secrets/client_secret_123241-asdadae.apps.googleusercontent.com`
 1. Run `python cli.py`
