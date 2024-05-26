@@ -184,11 +184,68 @@ class OutpostEmailClient(EmailClient):
         return df
 
 
+class AppleEmailClient(EmailClient):
+    def __init__(self):
+        super().__init__()
+        self.kws = {}
+
+    def run(self, after_date: Optional[str] = None) -> pd.DataFrame:
+        # Get and print the messages in the user's inbox
+        self.get_messages(
+            sender_email="no-reply@outpostclimbing.rezeve.com",
+            after_date=after_date,
+            subject="Booking confirmed:",
+            limit=0,
+        )
+        df = self.consolidate_all_emails()
+        return df
+
+    def print_emails(self) -> None:
+        for email in self.emails:
+            print(email.df)
+
+    def parse_html(self, html_str: str) -> pd.DataFrame:
+        dfs = [None]
+        with tempfile.NamedTemporaryFile(delete=True) as fp:
+            with open(fp.name, "w") as fwriter:
+                fwriter.write(html_str)
+            dfs = pd.read_html(fp)  # type: ignore
+        for df in dfs:
+            dff = df[df[0].isin(self.kws)]
+            if len(dff) < len(self.kws):
+                continue
+            else:
+                df = dff.copy()
+                df[0] = df[0].replace(self.kws)
+                df.set_index(0, inplace=True)
+                df = df.T
+                df["datetime"] = pd.to_datetime(
+                    df["datetime"], format="%d %b %Y @ %H:%M %p", errors="raise"
+                )
+                return df
+        return pd.DataFrame()
+
+    def get_message(self, message_id, user_id="me") -> EmailContent:
+        e = super().get_message(message_id, user_id)
+        df = self.parse_html(e.body_text)
+        return EmailContent(
+            sender=e.sender, subject=e.subject, body_text=e.body_text, df=df
+        )
+
+    def consolidate_all_emails(self) -> pd.DataFrame:
+        df = pd.concat([email.df for email in self.emails])
+        df.sort_values(by="datetime", inplace=True, ascending=True)
+        df.reset_index(drop=True, inplace=True)
+        df = df[self.kws.values()]
+        return df
+
+
 def main():
     # ec = EmailClient()
     op = OutpostEmailClient()
     df = op.run(after_date="2023-12-01")
     print(df)
+
 
 if __name__ == "__main__":
     main()
