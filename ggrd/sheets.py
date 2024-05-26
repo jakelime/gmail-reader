@@ -3,10 +3,15 @@ import warnings
 from typing import Optional
 
 import gspread
+from gspread.worksheet import Worksheet
 import pandas as pd
 
-from ggrd.auth import GoogleAuthManager
-from ggrd.utils import DATETIME_FMT, CustomLogger
+try:
+    from auth import GoogleAuthManager
+    from utils import DATETIME_FMT, CustomLogger
+except ImportError:
+    from ggrd.auth import GoogleAuthManager
+    from ggrd.utils import DATETIME_FMT, CustomLogger
 
 APP_NAME = "ggrd"
 
@@ -30,7 +35,7 @@ class GoogleSheetClient:
             try:
                 self.ss = self.gs.open(spreadsheet_name)
                 self.lg.info(f"spreadsheet loaded - {spreadsheet_name=}")
-            except gspread.SpreadsheetNotFound as e:
+            except gspread.exceptions.SpreadsheetNotFound:
                 self.lg.error(f"{spreadsheet_name=} not found")
                 self.ss = self.gs.create(spreadsheet_name)
                 self.lg.info(f"created new spreadsheet - {spreadsheet_name}")
@@ -81,8 +86,18 @@ class GoogleSheetClient:
 
         self.lg.info(f"updated {current_row-len(df)-2} entries")
 
+    def get_worksheet(self, sheet_name: str) -> Worksheet:
+        try:
+            worksheet = self.ss.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            self.lg.warning(f"no worksheet named '{sheet_name}'")
+            self.ss.add_worksheet(sheet_name, rows=1000, cols=10)
+            self.lg.info(f"created {sheet_name=}")
+            worksheet = self.ss.worksheet(sheet_name)
+        return worksheet
+
     def reset_and_write_data(self, df: pd.DataFrame, sheet_name: str = "data"):
-        worksheet = self.ss.worksheet(sheet_name)
+        worksheet = self.get_worksheet(sheet_name)
         worksheet.clear()
         df = self.parse_data_for_gsheet(df)
         worksheet.update(values=[list(df.columns)], range_name="A1")
@@ -102,3 +117,12 @@ class GoogleSheetClient:
         ds = df.iloc[-1, :]
         dt = ds["datetime"]
         return dt
+
+
+def main():
+    gsc = GoogleSheetClient(spreadsheet_name=f"{APP_NAME}-Outpost-ClimbRecords")
+    ws = gsc.get_worksheet("data")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,11 @@
-from ggrd.gmail import OutpostEmailClient
-from ggrd.sheets import GoogleSheetClient
-from ggrd.utils import CustomLogger
+try:
+    from gmail import OutpostEmailClient
+    from sheets import GoogleSheetClient
+    from utils import CustomLogger
+except ImportError:
+    from ggrd.gmail import OutpostEmailClient
+    from ggrd.sheets import GoogleSheetClient
+    from ggrd.utils import CustomLogger
 
 APP_NAME = "ggrd"
 
@@ -9,7 +14,9 @@ class Outpost:
     def __init__(self):
         self.lg = CustomLogger(APP_NAME).getLogger()
         self.email = OutpostEmailClient()
-        self.gsc = GoogleSheetClient(spreadsheet_name=f"{APP_NAME}-Outpost-ClimbRecords")
+        self.gsc = GoogleSheetClient(
+            spreadsheet_name=f"{APP_NAME}-Outpost-ClimbRecords"
+        )
 
     def pull_updates_from_email(self, self_reset: bool = True) -> None:
         try:
@@ -25,3 +32,12 @@ class Outpost:
     def reset_data(self) -> None:
         df = self.email.run()
         self.gsc.reset_and_write_data(df)
+
+
+def main():
+    op = Outpost()
+    op.reset_data()
+
+
+if __name__ == "__main__":
+    main()

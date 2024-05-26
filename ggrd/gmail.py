@@ -185,7 +185,10 @@ class OutpostEmailClient(EmailClient):
 
 
 def main():
-    ec = EmailClient()
+    # ec = EmailClient()
+    op = OutpostEmailClient()
+    df = op.run(after_date="2023-12-01")
+    print(df)
 
 if __name__ == "__main__":
     main()
