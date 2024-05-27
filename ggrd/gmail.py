@@ -350,7 +350,7 @@ class AppleEmailClient(EmailClient):
         df = pd.concat([email.df for email in self.emails])
         # df.sort_values(by="datetime", inplace=True, ascending=True)
         # df.reset_index(drop=True, inplace=True)
-        df.to_csv("helloworld.csv")
+        # df.to_csv("helloworld.csv")
         print(df)
         # df = df[self.kws.values()]
         return df
