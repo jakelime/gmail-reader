@@ -163,6 +163,8 @@ class OutpostEmailClient(EmailClient):
                 df[0] = df[0].replace(self.kws)
                 df.set_index(0, inplace=True)
                 df = df.T
+                # Known bug: In the email on 2024-05-26,
+                # 	26 May 2024 @ 09:00 PM is parsed as 2024-05-26 09:00:00
                 df["datetime"] = pd.to_datetime(
                     df["datetime"], format="%d %b %Y @ %H:%M %p", errors="raise"
                 )
